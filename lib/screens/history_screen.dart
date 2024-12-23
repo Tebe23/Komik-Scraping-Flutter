@@ -1,166 +1,174 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences.dart';
-import 'dart:convert';
-import '../models/manga.dart';
+import '../models/history_model.dart';
+import '../services/history_service.dart';
+import '../models/grouped_history.dart';
+import 'chapter_screen.dart';
+import 'detail_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key});
-
   @override
   _HistoryScreenState createState() => _HistoryScreenState();
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  List<Map<String, dynamic>> history = [];
-  bool isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadHistory();
-  }
-
-  Future<void> _loadHistory() async {
-    setState(() => isLoading = true);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final historyJson = prefs.getStringList('history') ?? [];
-      
-      setState(() {
-        history = historyJson
-            .map((json) => jsonDecode(json) as Map<String, dynamic>)
-            .toList();
-        isLoading = false;
-      });
-    } catch (e) {
-      print('Error loading history: $e');
-      setState(() => isLoading = false);
-    }
-  }
-
-  Future<void> _clearHistory() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('history');
-      setState(() {
-        history.clear();
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('History cleared')),
-      );
-    } catch (e) {
-      print('Error clearing history: $e');
-    }
-  }
-
-  String _formatDateTime(String timestamp) {
-    final date = DateTime.parse(timestamp);
-    return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute}';
-  }
+  final HistoryService _historyService = HistoryService();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('History'),
+        title: Text('Riwayat Baca'),
         actions: [
-          if (history.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.delete_sweep),
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Clear History'),
-                    content: const Text('Are you sure you want to clear all history?'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('CANCEL'),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _clearHistory();
-                        },
-                        child: const Text('CLEAR'),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
+          IconButton(
+            icon: Icon(Icons.delete_sweep),
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: Text('Hapus Riwayat'),
+                  content: Text('Hapus semua riwayat baca?'),
+                  actions: [
+                    TextButton(
+                      child: Text('Batal'),
+                      onPressed: () => Navigator.pop(context, false),
+                    ),
+                    TextButton(
+                      child: Text('Hapus'),
+                      onPressed: () => Navigator.pop(context, true),
+                    ),
+                  ],
+                ),
+              );
+
+              if (confirm == true) {
+                await _historyService.clearHistory();
+                setState(() {});
+              }
+            },
+          ),
         ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : history.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.history,
-                        size: 64,
-                        color: Colors.grey,
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'No reading history',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  itemCount: history.length,
-                  itemBuilder: (context, index) {
-                    final item = history[index];
-                    final manga = Manga.fromJson(item['manga']);
-                    final timestamp = item['timestamp'] as String;
-                    final chapter = item['chapter'] as Map<String, dynamic>;
+      body: FutureBuilder<List<ReadHistory>>(
+        future: _historyService.getHistory(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
+          }
 
-                    return ListTile(
-                      leading: SizedBox(
-                        width: 50,
-                        height: 70,
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.history, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'Belum ada riwayat baca',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ],
+              ),
+            );
+          }
+
+          final groupedHistories =
+              GroupedHistory.groupHistories(snapshot.data!);
+
+          return ListView.builder(
+            padding: EdgeInsets.all(8),
+            itemCount: groupedHistories.length,
+            itemBuilder: (context, index) {
+              final group = groupedHistories[index];
+              return Card(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ListTile(
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
                         child: Image.network(
-                          manga.imageUrl,
+                          group.mangaImage,
+                          width: 50,
+                          height: 70,
                           fit: BoxFit.cover,
                           errorBuilder: (context, error, stackTrace) =>
-                              const Icon(Icons.error),
+                              Container(
+                            width: 50,
+                            height: 70,
+                            color: Colors.grey[300],
+                            child: Icon(Icons.broken_image),
+                          ),
                         ),
                       ),
-                      title: Text(manga.title),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(chapter['title']),
-                          Text(
-                            _formatDateTime(timestamp),
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey,
+                      title: Text(group.mangaTitle),
+                      subtitle: Text('${group.chapters.length} chapter dibaca'),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              DetailScreen(mangaLink: group.mangaLink),
+                        ),
+                      ),
+                    ),
+                    Divider(height: 1),
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: NeverScrollableScrollPhysics(),
+                      itemCount: group.chapters.length,
+                      itemBuilder: (context, chapterIndex) {
+                        final chapter = group.chapters[chapterIndex];
+                        return ListTile(
+                          dense: true,
+                          title: Text(chapter.chapterTitle),
+                          subtitle: Text(
+                            'Dibaca ${_formatDate(chapter.readAt)}',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          trailing: IconButton(
+                            icon: Icon(Icons.remove_circle_outline),
+                            onPressed: () async {
+                              await _historyService
+                                  .removeFromHistory(chapter.chapterLink);
+                              setState(() {});
+                            },
+                          ),
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ChapterScreen(
+                                chapterLink: chapter.chapterLink,
+                                mangaTitle: chapter.mangaTitle,
+                                mangaLink: chapter.mangaLink,
+                                mangaImage: chapter.mangaImage,
+                              ),
                             ),
                           ),
-                        ],
-                      ),
-                      onTap: () {
-                        Navigator.pushNamed(
-                          context,
-                          '/reader',
-                          arguments: {
-                            'manga': manga,
-                            'chapter': chapter,
-                          },
                         );
                       },
-                    );
-                  },
+                    ),
+                  ],
                 ),
+              );
+            },
+          );
+        },
+      ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays == 0) {
+      if (difference.inHours == 0) {
+        return '${difference.inMinutes} menit yang lalu';
+      }
+      return '${difference.inHours} jam yang lalu';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} hari yang lalu';
+    }
+
+    return '${date.day}/${date.month}/${date.year}';
   }
 }

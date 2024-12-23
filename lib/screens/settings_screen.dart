@@ -1,96 +1,120 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart';
+import '../services/theme_service.dart';
+import '../services/history_service.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
-
   @override
   _SettingsScreenState createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool isDarkMode = false;
-  String imageQuality = 'Medium';
-  bool useExternalDownloader = false;
-  String downloadLocation = 'Default Location';
-  bool autoUpdateCheck = false;
+  final ThemeService _themeService = ThemeService();
+  final HistoryService _historyService = HistoryService();
+  bool _isDarkMode = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTheme();
+  }
+
+  Future<void> _loadTheme() async {
+    try {
+      final isDark = await _themeService.isDarkMode();
+      if (!mounted) return;
+      setState(() => _isDarkMode = isDark);
+    } catch (e) {
+      print('Error loading theme: $e');
+    }
+  }
+
+  Future<void> _exportData(BuildContext context) async {
+    try {
+      final data = await _historyService.exportData();
+      await Clipboard.setData(ClipboardData(text: data));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Data berhasil disalin ke clipboard')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal mengekspor data')),
+      );
+    }
+  }
+
+  Future<void> _importData(BuildContext context) async {
+    try {
+      final clipboardData = await Clipboard.getData('text/plain');
+      final text = clipboardData?.text;
+      if (text != null) {
+        await _historyService.importData(text);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Data berhasil diimpor')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Tidak ada data di clipboard')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Gagal mengimpor data')),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text('Pengaturan'),
       ),
       body: ListView(
         children: [
-          _buildSettingsSection('Appearance', [
-            SwitchListTile(
-              title: const Text('Dark Mode'),
-              subtitle: const Text('Enable dark theme for the app'),
-              value: isDarkMode,
-              onChanged: (value) {
-                setState(() {
-                  isDarkMode = value;
-                });
-                _saveSettings();
-              },
-            ),
-            ListTile(
-              title: const Text('Image Quality'),
-              subtitle: const Text('Select image quality for reading'),
-              trailing: DropdownButton<String>(
-                value: imageQuality,
-                onChanged: (String? newValue) {
-                  if (newValue != null) {
-                    setState(() {
-                      imageQuality = newValue;
-                    });
-                    _saveSettings();
-                  }
-                },
-                items: <String>['Low', 'Medium', 'High']
-                    .map<DropdownMenuItem<String>>((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-              ),
-            ),
-          ]),
-          // Additional settings sections can be added here
+          SwitchListTile(
+            title: Text('Mode Gelap'),
+            subtitle: Text('Mengubah tema aplikasi'),
+            value: _isDarkMode,
+            onChanged: (value) async {
+              try {
+                await _themeService.setDarkMode(value);
+                if (!mounted) return;
+                setState(() => _isDarkMode = value);
+              } catch (e) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Gagal mengubah tema')),
+                );
+              }
+            },
+          ),
+          Divider(),
+          ListTile(
+            title: Text('Backup Data'),
+            subtitle: Text('Salin data ke clipboard'),
+            leading: Icon(Icons.backup),
+            onTap: () => _exportData(context),
+          ),
+          ListTile(
+            title: Text('Restore Data'),
+            subtitle: Text('Tempel data dari clipboard'),
+            leading: Icon(Icons.restore),
+            onTap: () => _importData(context),
+          ),
+          Divider(),
+          AboutListTile(
+            icon: Icon(Icons.info),
+            applicationName: 'KomikApp',
+            applicationVersion: '1.0.0',
+            applicationLegalese: '© 2024 KomikApp',
+            aboutBoxChildren: [
+              SizedBox(height: 16),
+              Text('Aplikasi pembaca komik online'),
+            ],
+          ),
         ],
       ),
     );
-  }
-
-  Widget _buildSettingsSection(String title, List<Widget> children) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Text(
-            title,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).primaryColor,
-            ),
-          ),
-        ),
-        ...children,
-        const Divider(),
-      ],
-    );
-  }
-
-  Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('isDarkMode', isDarkMode);
-    await prefs.setString('imageQuality', imageQuality);
-    await prefs.setBool('useExternalDownloader', useExternalDownloader);
-    await prefs.setString('downloadLocation', downloadLocation);
-    await prefs.setBool('autoUpdateCheck', autoUpdateCheck);
   }
 }

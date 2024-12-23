@@ -1,138 +1,134 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences.dart';
-import 'dart:convert';
-import '../models/manga.dart';
-import '../services/manga_service.dart';
+import '../models/favorite_model.dart';
+import '../services/favorites_service.dart';
+import 'detail_screen.dart';
 
 class FavoritesScreen extends StatefulWidget {
-  const FavoritesScreen({super.key});
-
   @override
   _FavoritesScreenState createState() => _FavoritesScreenState();
 }
 
-class _FavoritesScreenState extends State<FavoritesScreen> {
-  List<Manga> favorites = [];
-  bool isLoading = true;
+class _FavoritesScreenState extends State<FavoritesScreen>
+    with AutomaticKeepAliveClientMixin {
+  final FavoritesService _favoritesService = FavoritesService();
+  String _sortBy = 'name'; // 'name', 'date', 'rating'
 
   @override
-  void initState() {
-    super.initState();
-    _loadFavorites();
-  }
-
-  Future<void> _loadFavorites() async {
-    setState(() => isLoading = true);
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final favoritesJson = prefs.getStringList('favorites') ?? [];
-      
-      setState(() {
-        favorites = favoritesJson
-            .map((json) => Manga.fromJson(jsonDecode(json)))
-            .toList();
-        isLoading = false;
-      });
-    } catch (e) {
-      print('Error loading favorites: $e');
-      setState(() => isLoading = false);
-    }
-  }
-
-  Future<void> _removeFavorite(Manga manga) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final favoritesJson = prefs.getStringList('favorites') ?? [];
-      
-      favoritesJson.removeWhere((json) {
-        final item = Manga.fromJson(jsonDecode(json));
-        return item.link == manga.link;
-      });
-      
-      await prefs.setStringList('favorites', favoritesJson);
-      
-      setState(() {
-        favorites.removeWhere((item) => item.link == manga.link);
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Removed from favorites')),
-      );
-    } catch (e) {
-      print('Error removing favorite: $e');
-    }
-  }
+  bool get wantKeepAlive => true;
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Favorites'),
+        title: Text('Favorit'),
+        actions: [
+          PopupMenuButton<String>(
+            icon: Icon(Icons.sort),
+            onSelected: (value) {
+              if (!mounted) return;
+              setState(() => _sortBy = value);
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'name',
+                child: Text('Nama'),
+              ),
+              PopupMenuItem(
+                value: 'date',
+                child: Text('Tanggal Ditambahkan'),
+              ),
+            ],
+          ),
+        ],
       ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : favorites.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.favorite_border,
-                        size: 64,
-                        color: Colors.grey,
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'No favorites yet',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
+      body: FutureBuilder<List<FavoriteManga>>(
+        future: _favoritesService.getFavorites(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
+          }
+
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.favorite_border, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text(
+                    'Belum ada manga favorit',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                )
-              : ListView.builder(
-                  itemCount: favorites.length,
-                  itemBuilder: (context, index) {
-                    final manga = favorites[index];
-                    return Dismissible(
-                      key: Key(manga.link),
-                      direction: DismissDirection.endToStart,
-                      background: Container(
-                        color: Colors.red,
-                        alignment: Alignment.centerRight,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: const Icon(
-                          Icons.delete,
-                          color: Colors.white,
-                        ),
+                ],
+              ),
+            );
+          }
+
+          final favorites = List<FavoriteManga>.from(snapshot.data!);
+
+          // Urutkan berdasarkan pilihan
+          switch (_sortBy) {
+            case 'name':
+              favorites.sort((a, b) => a.title.compareTo(b.title));
+              break;
+            case 'date':
+              favorites.sort((a, b) => b.addedAt.compareTo(a.addedAt));
+              break;
+          }
+
+          return ListView.builder(
+            padding: EdgeInsets.all(8),
+            itemCount: favorites.length,
+            itemBuilder: (context, index) {
+              final manga = favorites[index];
+              return Card(
+                child: ListTile(
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.network(
+                      manga.image,
+                      width: 50,
+                      height: 70,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        width: 50,
+                        height: 70,
+                        color: Colors.grey[300],
+                        child: Icon(Icons.broken_image),
                       ),
-                      onDismissed: (_) => _removeFavorite(manga),
-                      child: ListTile(
-                        leading: SizedBox(
-                          width: 50,
-                          height: 70,
-                          child: Image.network(
-                            manga.imageUrl,
-                            fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) =>
-                                const Icon(Icons.error),
-                          ),
-                        ),
-                        title: Text(manga.title),
-                        subtitle: Text(manga.chapter),
-                        onTap: () {
-                          Navigator.pushNamed(
-                            context,
-                            '/detail',
-                            arguments: manga,
-                          );
-                        },
-                      ),
-                    );
-                  },
+                    ),
+                  ),
+                  title: Text(manga.title),
+                  subtitle: Text(manga.latestChapter),
+                  trailing: IconButton(
+                    icon: Icon(Icons.delete),
+                    onPressed: () async {
+                      try {
+                        await _favoritesService.removeFromFavorites(manga.link);
+                        if (!mounted) return;
+                        setState(() {});
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                              content: Text('Gagal menghapus dari favorit')),
+                        );
+                      }
+                    },
+                  ),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => DetailScreen(mangaLink: manga.link),
+                    ),
+                  ),
                 ),
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }

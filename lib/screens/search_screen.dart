@@ -1,51 +1,55 @@
 import 'package:flutter/material.dart';
-import '../models/manga.dart';
-import '../services/manga_service.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import '../models/manga_models.dart';
+import '../services/scraping_service.dart';
+import '../widgets/error_screen.dart';
+import '../widgets/shimmer_loading.dart';
+import 'detail_screen.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  final String? initialQuery;
+
+  const SearchScreen({Key? key, this.initialQuery}) : super(key: key);
 
   @override
   _SearchScreenState createState() => _SearchScreenState();
 }
 
 class _SearchScreenState extends State<SearchScreen> {
-  final MangaService _mangaService = MangaService();
-  final _searchController = TextEditingController();
-  List<Manga> searchResults = [];
-  bool isLoading = false;
-  bool hasSearched = false;
+  final ScrapingService _scrapingService = ScrapingService();
+  final TextEditingController _searchController = TextEditingController();
+  List<Manga>? _searchResults;
+  bool _isLoading = false;
+  String? _error;
 
   Future<void> _performSearch(String query) async {
     if (query.isEmpty) return;
 
     setState(() {
-      isLoading = true;
-      hasSearched = true;
+      _isLoading = true;
+      _error = null;
     });
 
     try {
-      final results = await _mangaService.searchManga(query);
+      final results = await _scrapingService.searchManga(query);
       setState(() {
-        searchResults = results;
-        isLoading = false;
+        _searchResults = results;
+        _isLoading = false;
       });
     } catch (e) {
-      print('Error searching manga: $e');
       setState(() {
-        isLoading = false;
+        _error = 'Koneksi Error';
+        _isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error searching manga')),
-      );
     }
   }
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    if (widget.initialQuery != null) {
+      _searchController.text = widget.initialQuery!;
+      _performSearch(widget.initialQuery!);
+    }
   }
 
   @override
@@ -54,82 +58,133 @@ class _SearchScreenState extends State<SearchScreen> {
       appBar: AppBar(
         title: TextField(
           controller: _searchController,
-          decoration: const InputDecoration(
-            hintText: 'Search manga...',
-            hintStyle: TextStyle(color: Colors.white70),
+          decoration: InputDecoration(
+            hintText: 'Cari manga...',
             border: InputBorder.none,
+            hintStyle: TextStyle(color: Colors.grey),
           ),
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: Colors.black),
           onSubmitted: _performSearch,
         ),
-      ),
-      body: Column(
-        children: [
-          if (isLoading)
-            const LinearProgressIndicator(),
-          Expanded(
-            child: !hasSearched
-                ? const Center(
-                    child: Text('Search for your favorite manga'),
-                  )
-                : searchResults.isEmpty
-                    ? const Center(
-                        child: Text('No results found'),
-                      )
-                    : ListView.builder(
-                        itemCount: searchResults.length,
-                        itemBuilder: (context, index) {
-                          final manga = searchResults[index];
-                          return _buildMangaListItem(manga);
-                        },
-                      ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.search),
+            onPressed: () => _performSearch(_searchController.text),
           ),
         ],
       ),
+      body: _buildBody(),
     );
   }
 
-  Widget _buildMangaListItem(Manga manga) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: ListTile(
-        leading: ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: CachedNetworkImage(
-            imageUrl: manga.imageUrl,
-            width: 50,
-            height: 70,
-            fit: BoxFit.cover,
-            placeholder: (context, url) => Container(
-              color: Colors.grey[300],
-              child: const Center(child: CircularProgressIndicator()),
-            ),
-            errorWidget: (context, url, error) => const Icon(Icons.error),
-          ),
+  Widget _buildBody() {
+    if (_error != null) {
+      return ErrorScreen(
+        message: 'Koneksi Error',
+        onRetry: () => _performSearch(_searchController.text),
+      );
+    }
+
+    if (_isLoading) {
+      return GridView.builder(
+        padding: EdgeInsets.all(8),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          childAspectRatio: 0.75,
+          crossAxisSpacing: 8,
+          mainAxisSpacing: 8,
         ),
-        title: Text(
-          manga.title,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
+        itemCount: 6,
+        itemBuilder: (context, index) => ShimmerLoading(
+          width: double.infinity,
+          height: double.infinity,
         ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      );
+    }
+
+    if (_searchResults == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(manga.chapter),
+            Icon(Icons.search, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
             Text(
-              '${manga.type} • ${manga.status}',
-              style: const TextStyle(fontSize: 12),
+              'Cari manga favorit Anda',
+              style: Theme.of(context).textTheme.titleMedium,
             ),
           ],
         ),
-        onTap: () {
-          Navigator.pushNamed(
-            context,
-            '/detail',
-            arguments: manga,
-          );
-        },
+      );
+    }
+
+    if (_searchResults!.isEmpty) {
+      return Center(
+        child: Text('Tidak ada hasil yang ditemukan'),
+      );
+    }
+
+    return GridView.builder(
+      padding: EdgeInsets.all(8),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.75,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
       ),
+      itemCount: _searchResults!.length,
+      itemBuilder: (context, index) {
+        final manga = _searchResults![index];
+        return GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => DetailScreen(mangaLink: manga.link),
+            ),
+          ),
+          child: Card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Image.network(
+                    manga.image,
+                    fit: BoxFit.cover,
+                    width: double.infinity,
+                  ),
+                ),
+                Padding(
+                  padding: EdgeInsets.all(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        manga.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        manga.latestChapter,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 }

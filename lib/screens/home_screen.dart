@@ -1,136 +1,355 @@
 import 'package:flutter/material.dart';
-import '../models/manga.dart';
-import '../services/manga_service.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import '../utils/error_handler.dart'; // Importing ErrorHandler and ErrorType
+import '../services/scraping_service.dart';
+import '../models/manga_models.dart';
+import '../widgets/shimmer_loading.dart';
+import '../widgets/error_screen.dart';
+import 'detail_screen.dart';
+import 'search_screen.dart';
+import '../services/cache_service.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
-
   @override
   _HomeScreenState createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final MangaService _mangaService = MangaService();
-  List<Manga> latestManga = [];
-  List<Manga> popularManga = [];
-  bool isLoading = true;
+  final ScrapingService _scrapingService = ScrapingService();
+  final CacheService _cacheService = CacheService();
+  List<Manga> _popularMangaList = [];
+  List<Manga> _latestMangaList = [];
+  bool _isLoadingPopular = true;
+  bool _isLoadingLatest = true;
+  String? _error;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _loadInitialData();
   }
 
-  Future<void> _loadData() async {
-    setState(() => isLoading = true);
+  Future<void> _loadInitialData() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingPopular = true;
+      _isLoadingLatest = true;
+      _error = null;
+    });
+
     try {
-      final latest = await _mangaService.getLatestManga();
-      final popular = await _mangaService.getPopularManga();
-      setState(() {
-        latestManga = latest;
-        popularManga = popular;
-        isLoading = false;
-      });
+      // Try to load from cache first
+      final cachedData = await _cacheService.getCachedHomeData();
+      if (cachedData != null) {
+        if (!mounted) return;
+        setState(() {
+          _popularMangaList = cachedData['popular']!;
+          _latestMangaList = cachedData['latest']!;
+          _isLoadingPopular = false;
+          _isLoadingLatest = false;
+        });
+        return;
+      }
+
+      // If no cache, load from network
+      await _loadMangaLists();
     } catch (e) {
-      ErrorHandler.showError(context, ErrorType.unknown, e.toString());
-      setState(() => isLoading = false);
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _isLoadingPopular = false;
+        _isLoadingLatest = false;
+      });
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Manga Reader'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              // Navigate to search screen
-            },
-          ),
-        ],
-      ),
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : RefreshIndicator(
-              onRefresh: _loadData,
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildSection('Latest Updates', latestManga),
-                    _buildSection('Popular Manga', popularManga),
-                  ],
-                ),
-              ),
-            ),
-    );
+  Future<void> _loadMangaLists() async {
+    try {
+      final futures = await Future.wait([
+        _scrapingService.scrapePopularManga(),
+        _scrapingService.scrapeLatestManga(),
+      ]);
+
+      if (!mounted) return;
+      setState(() {
+        _popularMangaList = futures[0];
+        _latestMangaList = futures[1];
+        _isLoadingPopular = false;
+        _isLoadingLatest = false;
+      });
+
+      // Cache the data
+      await _cacheService.cacheHomeData(
+        popularManga: _popularMangaList,
+        latestManga: _latestMangaList,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _isLoadingPopular = false;
+        _isLoadingLatest = false;
+      });
+    }
   }
 
-  Widget _buildSection(String title, List<Manga> mangaList) {
+  Widget _buildMangaSection(
+      String title, List<Manga> mangaList, bool isLoading) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.all(16),
+          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Text(
             title,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
         ),
         SizedBox(
-          height: 200,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: mangaList.length,
-            itemBuilder: (context, index) {
-              final manga = mangaList[index];
-              return _buildMangaCard(manga);
-            },
-          ),
+          height: 280,
+          child: isLoading
+              ? ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: 5,
+                  itemBuilder: (context, index) => ShimmerLoading(
+                    width: 160,
+                    height: 280,
+                    margin: EdgeInsets.symmetric(horizontal: 4),
+                  ),
+                )
+              : ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  itemCount: mangaList.length,
+                  itemBuilder: (context, index) => SizedBox(
+                    width: 160,
+                    child: MangaCard(manga: mangaList[index]),
+                  ),
+                ),
         ),
       ],
     );
   }
 
-  Widget _buildMangaCard(Manga manga) {
-    return Container(
-      width: 120,
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: CachedNetworkImage(
-              imageUrl: manga.imageUrl,
-              fit: BoxFit.cover,
-              placeholder: (context, url) => const Center(
-                child: CircularProgressIndicator(),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: RefreshIndicator(
+        onRefresh: _loadMangaLists,
+        child: CustomScrollView(
+          slivers: [
+            SliverAppBar(
+              floating: true,
+              title: Text(
+                'KomikApp',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              errorWidget: (context, url, error) => const Icon(Icons.error),
+              bottom: PreferredSize(
+                preferredSize: Size.fromHeight(60),
+                child: Padding(
+                  padding: EdgeInsets.all(8.0),
+                  child: TextField(
+                    controller: _searchController,
+                    focusNode: _searchFocus,
+                    decoration: InputDecoration(
+                      hintText: 'Cari manga...',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      filled: true,
+                      fillColor: Theme.of(context).cardColor,
+                      contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                    ),
+                    onSubmitted: (query) {
+                      if (query.isNotEmpty) {
+                        _searchFocus.unfocus();
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) =>
+                                SearchScreen(initialQuery: query),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ),
+              actions: [
+                IconButton(
+                  icon: Icon(Icons.search),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => SearchScreen()),
+                    );
+                  },
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            manga.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12),
-          ),
-          Text(
-            manga.chapter,
-            style: const TextStyle(
-              fontSize: 11,
-              color: Colors.grey,
+            if (_error != null)
+              SliverFillRemaining(
+                child: ErrorScreen(
+                  message: 'Koneksi Error',
+                  onRetry: _loadMangaLists,
+                ),
+              )
+            else ...[
+              SliverToBoxAdapter(
+                child: Column(
+                  children: [
+                    _buildMangaSection(
+                      'Komik Populer',
+                      _popularMangaList,
+                      _isLoadingPopular,
+                    ),
+                    _buildMangaSection(
+                      'Komik Terbaru',
+                      _latestMangaList,
+                      _isLoadingLatest,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+}
+
+class MangaCard extends StatelessWidget {
+  final Manga manga;
+
+  const MangaCard({Key? key, required this.manga}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (context) => DetailScreen(mangaLink: manga.link)),
+      ),
+      child: Card(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  Hero(
+                    tag: 'manga-${manga.link}',
+                    child: Image.network(
+                      manga.image,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) =>
+                          Center(child: Icon(Icons.broken_image)),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    left: 8,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Text(
+                        manga.type,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.star, color: Colors.amber, size: 16),
+                          SizedBox(width: 4),
+                          Text(
+                            manga.score,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.8),
+                            Colors.transparent,
+                          ],
+                        ),
+                      ),
+                      padding: EdgeInsets.all(8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            manga.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            manga.latestChapter,
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
