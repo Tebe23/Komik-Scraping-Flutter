@@ -2,6 +2,7 @@ import 'package:http/http.dart' as http;
 import 'package:html/parser.dart' as parser;
 import 'package:html/dom.dart';
 import '../models/manga_models.dart';
+import 'dart:io';
 
 class ScrapingService {
   static const baseUrl = 'https://komikcast.bz';
@@ -208,5 +209,11 @@ class ScrapingService {
     } catch (e) {
       throw Exception('Error searching manga: $e');
     }
+  }
+
+  void backupRestore(String filePath) {
+    String fileContent = File(filePath).readAsStringSync();
+    // Proses fileContent sesuai kebutuhan
+    // ...
   }
 }

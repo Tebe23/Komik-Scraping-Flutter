@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:open_file/open_file.dart';
 import '../services/theme_service.dart';
 import '../services/history_service.dart';
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
 
 class SettingsScreen extends StatefulWidget {
   @override
@@ -31,31 +36,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _exportData(BuildContext context) async {
     try {
-      final data = await _historyService.exportData();
-      await Clipboard.setData(ClipboardData(text: data));
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Data berhasil disalin ke clipboard')),
-      );
+      var status = await Permission.storage.request();
+      print('Status izin: $status');
+      if (status.isGranted) {
+        final data = await _historyService.exportData();
+
+        // Tentukan direktori penyimpanan eksternal
+        final externalDirectory =
+            Directory('/storage/emulated/0/MyAppBackup/Backups');
+
+        // Buat folder jika belum ada
+        if (!(await externalDirectory.exists())) {
+          await externalDirectory.create(recursive: true);
+        }
+
+        final filePath =
+            '${externalDirectory.path}/data.txt'; // Tentukan nama file
+
+        final file = File(filePath);
+        await file.writeAsString(data);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Data berhasil disimpan ke $filePath')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Izin akses penyimpanan ditolak')),
+        );
+      }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Gagal mengekspor data')),
+        SnackBar(content: Text('Gagal mengekspor data: $e')),
       );
     }
   }
 
   Future<void> _importData(BuildContext context) async {
     try {
-      final clipboardData = await Clipboard.getData('text/plain');
-      final text = clipboardData?.text;
-      if (text != null) {
-        await _historyService.importData(text);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Data berhasil diimpor')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Tidak ada data di clipboard')),
-        );
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['txt'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        String? filePath = result.files.single.path;
+        if (filePath != null) {
+          final file = File(filePath);
+          final text = await file.readAsString();
+          await _historyService.importData(text);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Data berhasil diimpor dari $filePath')),
+          );
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -92,13 +124,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Divider(),
           ListTile(
             title: Text('Backup Data'),
-            subtitle: Text('Salin data ke clipboard'),
+            subtitle: Text('Simpan data ke lokasi yang ditentukan'),
             leading: Icon(Icons.backup),
             onTap: () => _exportData(context),
           ),
           ListTile(
             title: Text('Restore Data'),
-            subtitle: Text('Tempel data dari clipboard'),
+            subtitle: Text('Pilih file untuk dipulihkan'),
             leading: Icon(Icons.restore),
             onTap: () => _importData(context),
           ),
