@@ -18,7 +18,7 @@ class ScrapingService {
 
   Future<List<Manga>> scrapeLatestManga() async {
     try {
-      final latestUrl = '$baseUrl/daftar-komik/?status=&type=&orderby=update';
+      final latestUrl = '$baseUrl/daftar-komik/?sortby=update';
       return _scrapeMangaList(latestUrl);
     } catch (e) {
       throw Exception('Error scraping latest manga: $e');
