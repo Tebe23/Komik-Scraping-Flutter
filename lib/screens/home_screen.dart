@@ -22,6 +22,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _error;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode();
+  String _selectedType = 'All';
 
   @override
   void initState() {
@@ -144,26 +145,68 @@ class _HomeScreenState extends State<HomeScreen> {
           slivers: [
             SliverAppBar(
               floating: true,
-              title: Text(
-                'KomikApp',
-                style: TextStyle(fontWeight: FontWeight.bold),
+              expandedHeight: 120,
+              backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+              elevation: 0,
+              flexibleSpace: FlexibleSpaceBar(
+                background: Container(
+                  padding: EdgeInsets.fromLTRB(16, 60, 16, 8),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            'KomikApp',
+                            style: Theme.of(context)
+                                .textTheme
+                                .headlineMedium
+                                ?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).primaryColor,
+                                ),
+                          ),
+                          Spacer(),
+                          IconButton(
+                            icon: Icon(Icons.search, size: 28),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (context) => SearchScreen()),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              bottom: PreferredSize(
-                preferredSize: Size.fromHeight(60),
+            ),
+            if (_error != null)
+              SliverFillRemaining(
+                child: ErrorScreen(
+                  message: 'Koneksi Error',
+                  onRetry: _loadMangaLists,
+                ),
+              )
+            else ...[
+              // Search Bar
+              SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.all(8.0),
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   child: TextField(
                     controller: _searchController,
                     focusNode: _searchFocus,
                     decoration: InputDecoration(
                       hintText: 'Cari manga...',
-                      prefixIcon: Icon(Icons.search),
+                      prefixIcon: Icon(Icons.search, color: Colors.grey),
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
                       ),
                       filled: true,
-                      fillColor: Theme.of(context).cardColor,
-                      contentPadding: EdgeInsets.symmetric(horizontal: 16),
+                      fillColor: Theme.of(context).cardColor.withOpacity(0.8),
+                      contentPadding:
+                          EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     ),
                     onSubmitted: (query) {
                       if (query.isNotEmpty) {
@@ -180,40 +223,158 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              actions: [
-                IconButton(
-                  icon: Icon(Icons.search),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (context) => SearchScreen()),
-                    );
-                  },
-                ),
-              ],
-            ),
-            if (_error != null)
-              SliverFillRemaining(
-                child: ErrorScreen(
-                  message: 'Koneksi Error',
-                  onRetry: _loadMangaLists,
-                ),
-              )
-            else ...[
+
+              // Popular Manga Section
               SliverToBoxAdapter(
-                child: Column(
-                  children: [
-                    _buildMangaSection(
-                      'Komik Populer',
-                      _popularMangaList,
-                      _isLoadingPopular,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(16, 24, 16, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Komik Populer',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          // Action for viewing more popular manga
+                        },
+                        child: Text(
+                          'Lihat Lainnya',
+                          style: TextStyle(
+                            color: Theme.of(context).primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Popular Manga List
+              SliverToBoxAdapter(
+                child: SizedBox(
+                  height: 280,
+                  child: _isLoadingPopular
+                      ? ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          itemCount: 5,
+                          itemBuilder: (context, index) => ShimmerLoading(
+                            width: 180,
+                            height: 280,
+                            margin: EdgeInsets.symmetric(horizontal: 4),
+                          ),
+                        )
+                      : ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          itemCount: _popularMangaList.length,
+                          itemBuilder: (context, index) => Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 4),
+                            child: SizedBox(
+                              width: 180,
+                              child: MangaCard(manga: _popularMangaList[index]),
+                            ),
+                          ),
+                        ),
+                ),
+              ),
+
+              // Latest Manga Section
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(16, 32, 16, 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Komik Terbaru',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).cardColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: EdgeInsets.symmetric(horizontal: 12),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedType,
+                            icon: Icon(Icons.keyboard_arrow_down),
+                            borderRadius: BorderRadius.circular(12),
+                            onChanged: (String? newValue) {
+                              setState(() {
+                                _selectedType = newValue!;
+                              });
+                            },
+                            items: <String>['All', 'Manga', 'Manhua', 'Manhwa']
+                                .map<DropdownMenuItem<String>>((String value) {
+                              return DropdownMenuItem<String>(
+                                value: value,
+                                child: Text(value),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Latest Manga Grid
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                sliver: SliverGrid(
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.6,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                  ),
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final filteredList = _latestMangaList
+                          .where((manga) =>
+                              _selectedType == 'All' ||
+                              manga.type == _selectedType)
+                          .toList();
+                      return MangaCard(manga: filteredList[index]);
+                    },
+                    childCount: _latestMangaList
+                        .where((manga) =>
+                            _selectedType == 'All' ||
+                            manga.type == _selectedType)
+                        .length,
+                  ),
+                ),
+              ),
+
+              // View More Button
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        // Action for viewing more latest manga
+                      },
+                      style: ElevatedButton.styleFrom(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text('Lihat Lainnya'),
                     ),
-                    _buildMangaSection(
-                      'Komik Terbaru',
-                      _latestMangaList,
-                      _isLoadingLatest,
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ],
