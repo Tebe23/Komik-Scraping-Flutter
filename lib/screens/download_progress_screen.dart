@@ -52,20 +52,15 @@ class _DownloadProgressScreenState extends State<DownloadProgressScreen> {
       ),
       body: StreamBuilder<Map<String, DownloadItem>>(
         stream: _downloadManager.downloadsStream,
-        initialData: {}, // Add this
+        initialData: {},
         builder: (context, snapshot) {
           if (snapshot.hasError) {
             return Center(child: Text('Terjadi kesalahan'));
           }
 
-          final activeDownloads = (snapshot.data ?? {}).values.where(
-            (item) => item.status == DownloadStatus.downloading || 
-                     item.status == DownloadStatus.queued ||
-                     item.status == DownloadStatus.paused ||
-                     item.status == DownloadStatus.failed
-          ).toList();
+          final groups = _downloadManager.getActiveGroups();
 
-          if (activeDownloads.isEmpty) {
+          if (groups.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -79,41 +74,57 @@ class _DownloadProgressScreenState extends State<DownloadProgressScreen> {
           }
 
           return ListView.builder(
-            itemCount: activeDownloads.length,
+            itemCount: groups.length,
             itemBuilder: (context, index) {
-              final item = activeDownloads[index];
+              final group = groups[index];
               return Card(
-                child: ListTile(
+                margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ExpansionTile(
                   leading: ClipRRect(
                     borderRadius: BorderRadius.circular(4),
                     child: CachedNetworkImage(
-                      imageUrl: item.mangaImage,
+                      imageUrl: group.image,
                       width: 40,
                       height: 60,
                       fit: BoxFit.cover,
                     ),
                   ),
-                  title: Text(
-                    '${item.mangaTitle}\n${item.chapterTitle}',
-                    style: TextStyle(fontSize: 14),
-                  ),
+                  title: Text(group.title),
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      if (item.status == DownloadStatus.failed)
-                        Text(
-                          item.error ?? 'Gagal mengunduh',
-                          style: TextStyle(color: Colors.red, fontSize: 12),
-                        )
-                      else
-                        LinearProgressIndicator(value: item.progress),
+                      Text('${group.items.length} chapter'),
+                      LinearProgressIndicator(
+                        value: group.totalProgress,
+                        backgroundColor: Colors.grey[200],
+                      ),
                       Text(
-                        '${(item.progress * 100).toStringAsFixed(0)}%',
+                        '${(group.totalProgress * 100).toStringAsFixed(0)}%',
                         style: TextStyle(fontSize: 12),
                       ),
                     ],
                   ),
-                  trailing: _buildActionButton(item),
+                  children: group.items.map((item) => ListTile(
+                    dense: true,
+                    title: Text(item.chapterTitle),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (item.status == DownloadStatus.failed)
+                          Text(
+                            item.error ?? 'Gagal mengunduh',
+                            style: TextStyle(color: Colors.red, fontSize: 12),
+                          )
+                        else
+                          LinearProgressIndicator(value: item.progress),
+                        Text(
+                          '${(item.progress * 100).toStringAsFixed(0)}%',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                    trailing: _buildActionButton(item),
+                  )).toList(),
                 ),
               );
             },
