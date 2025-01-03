@@ -12,6 +12,11 @@ class ReadingStateService {
     _readingController.add(chapterLink);
   }
 
+  // Alias for consistency with existing code
+  void notifyChapterRead(String chapterLink) {
+    markChapterAsRead(chapterLink);
+  }
+
   void dispose() {
     _readingController.close();
   }

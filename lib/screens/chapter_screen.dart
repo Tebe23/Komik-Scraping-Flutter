@@ -12,6 +12,7 @@ import '../widgets/reading_progress_bar.dart';
 import '../services/history_service.dart';
 import '../models/history_model.dart';
 import '../services/reading_state_service.dart';
+import '../services/download_service.dart';
 
 class ChapterScreen extends StatefulWidget {
   final String chapterLink;
@@ -41,6 +42,7 @@ class _ChapterScreenState extends State<ChapterScreen> {
   final ScrapingService _scrapingService = ScrapingService();
   final HistoryService _historyService = HistoryService();
   final ReadingStateService _readingStateService = ReadingStateService();
+  final DownloadService _downloadService = DownloadService();
   late Future<ChapterData> _chapterFuture;
   late ScrollController _scrollController;
   bool _showControls = true;
@@ -49,14 +51,64 @@ class _ChapterScreenState extends State<ChapterScreen> {
   Timer? _brightnessUpdateTimer;
 
   double _brightness = 1.0;
+  double _systemBrightness = 1.0;
+  static const double maxBrightnessMultiplier = 9.0; // Increased from 3.0 to 9.0 (3x)
   bool _autoScroll = false;
-  double _scrollSpeed = 1.0;
+  double _scrollSpeed = 2.0; // Default speed increased
+  static const double minScrollSpeed = 0.5;
+  static const double maxScrollSpeed = 10.0; // Increased max speed
   int _currentPage = 0;
+  List<ChapterInfo>? _offlineChapters;
+
+  // Add scaffold key
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   @override
   void initState() {
     super.initState();
     _initializeData();
+    _initializeBrightness();
+    if (widget.isDownloaded) {
+      _loadOfflineChapters();
+    }
+  }
+
+  Future<void> _saveHistory(String title) async {
+    if (!mounted) return;
+    
+    try {
+      String chapterLink = widget.chapterLink;
+      String chapterTitle = title;
+
+      if (widget.isDownloaded && widget.localPath != null) {
+        // Get original metadata for downloaded chapter
+        final downloadService = DownloadService();
+        final metadata = await downloadService.getChapterMetadata(
+          widget.mangaTitle,
+          title
+        );
+        
+        if (metadata['originalLink']?.isNotEmpty == true) {
+          chapterLink = metadata['originalLink']!;
+          chapterTitle = metadata['title'] ?? title;
+        }
+      }
+
+      await _historyService.addToHistory(
+        ReadHistory(
+          mangaTitle: widget.mangaTitle,
+          mangaLink: widget.mangaLink ?? '',
+          mangaImage: widget.mangaImage ?? '',
+          chapterTitle: chapterTitle,
+          chapterLink: chapterLink,
+          readAt: DateTime.now(),
+        ),
+      );
+
+      _readingStateService.markChapterAsRead(chapterLink);
+    } catch (e) {
+      print('Error saving history: $e');
+    }
   }
 
   Future<void> _initializeData() async {
@@ -65,32 +117,53 @@ class _ChapterScreenState extends State<ChapterScreen> {
       _scrollController = ScrollController()..addListener(_handleScroll);
       _startHideTimer();
 
-      await _historyService.addToHistory(
-        ReadHistory(
-          mangaTitle: widget.mangaTitle,
-          mangaLink: widget.mangaLink ?? '',
-          mangaImage: widget.mangaImage ?? '',
-          chapterTitle: 'Chapter ${widget.chapterLink}',
-          chapterLink: widget.chapterLink,
-          readAt: DateTime.now(),
-        ),
-      );
-
       final chapterData = await _chapterFuture;
       if (!mounted) return;
 
-      await _historyService.addToHistory(
-        ReadHistory(
-          mangaTitle: widget.mangaTitle,
-          mangaLink: widget.mangaLink ?? '',
-          mangaImage: widget.mangaImage ?? '',
-          chapterTitle: chapterData.title,
-          chapterLink: widget.chapterLink,
-          readAt: DateTime.now(),
-        ),
-      );
+      // Simpan ke history setelah data chapter didapat
+      await _saveHistory(chapterData.title);
+      
     } catch (e) {
       print('Error initializing data: $e');
+    }
+  }
+
+  Future<void> _loadOfflineChapters() async {
+    try {
+      final groups = await _downloadService.getDownloadedManga();
+      final mangaGroup = groups.firstWhere(
+        (group) => group.title == widget.mangaTitle,
+        orElse: () => throw 'Manga not found',
+      );
+
+      final chapters = <ChapterInfo>[];
+      for (var item in mangaGroup.items) {
+        chapters.add(ChapterInfo(
+          title: item.chapterTitle,
+          link: item.chapterLink,
+          time: '', // Required field but not used for offline
+        ));
+      }
+
+      if (mounted) {
+        setState(() {
+          _offlineChapters = chapters;
+        });
+      }
+    } catch (e) {
+      print('Error loading offline chapters: $e');
+    }
+  }
+
+  void _initializeBrightness() async {
+    try {
+      final window = WidgetsBinding.instance.window;
+      _systemBrightness = 1.0;
+      // Start with system brightness
+      _brightness = 1.0;
+      setState(() {});
+    } catch (e) {
+      print('Error initializing brightness: $e');
     }
   }
 
@@ -127,50 +200,71 @@ class _ChapterScreenState extends State<ChapterScreen> {
   void _showSettings() {
     showModalBottomSheet(
       context: context,
-      builder: (context) => ReaderSettingsSheet(
-        brightness: _brightness,
-        autoScroll: _autoScroll,
-        scrollSpeed: _scrollSpeed,
-        onBrightnessChanged: (value) {
-          setState(() => _brightness = value);
-        },
-        onAutoScrollChanged: (value) {
-          setState(() => _autoScroll = value);
-          _startAutoScroll();
-        },
-        onScrollSpeedChanged: (value) {
-          setState(() => _scrollSpeed = value);
-          if (_autoScroll) _startAutoScroll();
-        },
+      backgroundColor: Colors.transparent,
+      isDismissible: true, // Changed to true for better UX
+      enableDrag: true,    // Changed to true for better UX
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).canvasColor,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: ReaderSettingsSheet(
+          brightness: _brightness,  // Simplified brightness handling
+          autoScroll: _autoScroll,
+          scrollSpeed: _scrollSpeed,
+          minScrollSpeed: minScrollSpeed,
+          maxScrollSpeed: maxScrollSpeed,
+          maxBrightnessMultiplier: maxBrightnessMultiplier,
+          onBrightnessChanged: (value) {
+            setState(() => _brightness = value);
+          },
+          onAutoScrollChanged: (value) {
+            if (mounted) {
+              setState(() {
+                _autoScroll = value;
+                if (value) _startAutoScroll();
+              });
+            }
+          },
+          onScrollSpeedChanged: (value) {
+            if (mounted) {
+              setState(() {
+                _scrollSpeed = value;
+                if (_autoScroll) _startAutoScroll();
+              });
+            }
+          },
+        ),
       ),
     );
   }
 
   void _startAutoScroll() {
+    _autoScrollTimer?.cancel();
+    
     if (_autoScroll) {
-      _autoScrollTimer?.cancel();
       _autoScrollTimer = Timer.periodic(Duration(milliseconds: 16), (timer) {
+        if (!mounted || !_autoScroll) {
+          timer.cancel();
+          return;
+        }
+        
         if (_scrollController.hasClients) {
-          final newOffset = _scrollController.offset + (_scrollSpeed * 0.5);
-          if (newOffset >= _scrollController.position.maxScrollExtent) {
+          if (_scrollController.offset >= _scrollController.position.maxScrollExtent) {
             timer.cancel();
             setState(() => _autoScroll = false);
           } else {
-            _scrollController.animateTo(
-              newOffset,
-              duration: Duration(milliseconds: 16),
-              curve: Curves.linear,
+            _scrollController.jumpTo(
+              _scrollController.offset + (_scrollSpeed * 2.0)
             );
           }
         }
       });
-    } else {
-      _autoScrollTimer?.cancel();
     }
   }
 
   void _updateBrightness(double value) {
-    setState(() => _brightness = value);
+    setState(() => _brightness = value.clamp(0.0, 1.0));
     _brightnessUpdateTimer?.cancel();
     _brightnessUpdateTimer = Timer(Duration(milliseconds: 16), () {
       if (mounted) setState(() {});
@@ -282,8 +376,161 @@ class _ChapterScreenState extends State<ChapterScreen> {
     );
   }
 
+  Future<String?> _getOfflineChapterPath(String chapterTitle) async {
+    try {
+      final groups = await _downloadService.getDownloadedManga();
+      final mangaGroup = groups.firstWhere(
+        (group) => group.title == widget.mangaTitle,
+      );
+      
+      final downloadItem = mangaGroup.items.firstWhere(
+        (item) => item.chapterTitle == chapterTitle,
+      );
+      
+      return await _downloadService.getFullChapterPath(downloadItem);
+    } catch (e) {
+      print('Error getting offline path: $e');
+      return null;
+    }
+  }
+
+  Widget _buildControlPanel(ChapterData chapter) {
+    return Positioned(
+      bottom: 16,
+      left: 16,
+      right: 16,
+      child: Column(
+        children: [
+          if (_autoScroll) Card(
+            color: Colors.black.withOpacity(0.7),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.speed, color: Colors.white),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: SliderTheme(
+                      data: SliderTheme.of(context).copyWith(
+                        overlayShape: SliderComponentShape.noOverlay,
+                      ),
+                      child: Slider(
+                        value: _scrollSpeed,
+                        min: minScrollSpeed,
+                        max: maxScrollSpeed,
+                        divisions: 19,
+                        label: '${_scrollSpeed.toStringAsFixed(1)}x',
+                        onChanged: (value) {
+                          setState(() {
+                            _scrollSpeed = value;
+                          });
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Card(
+            color: Colors.black.withOpacity(0.7),
+            child: Padding(
+              padding: EdgeInsets.all(8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  if (chapter.prevChapter != null)
+                    IconButton(
+                      icon: Icon(Icons.skip_previous, color: Colors.white),
+                      onPressed: () async {
+                        if (widget.isDownloaded) {
+                          // Find previous chapter from offline chapters
+                          final currentIndex = _offlineChapters?.indexWhere(
+                            (c) => c.link == widget.chapterLink
+                          ) ?? -1;
+                          if (currentIndex > 0 && _offlineChapters != null) {
+                            final prevChapter = _offlineChapters![currentIndex - 1];
+                            final localPath = await _getOfflineChapterPath(prevChapter.title);
+                            _navigateToChapter(prevChapter.link, localPath);
+                          }
+                        } else {
+                          _navigateToChapter(chapter.prevChapter!, null);
+                        }
+                      },
+                    ),
+                  IconButton(
+                    icon: Icon(Icons.list, color: Colors.white),
+                    onPressed: () => _scaffoldKey.currentState?.openEndDrawer(),
+                  ),
+                  IconButton(
+                    icon: Icon(_autoScroll ? Icons.pause : Icons.play_arrow, 
+                         color: Colors.white),
+                    onPressed: () {
+                      setState(() {
+                        _autoScroll = !_autoScroll;
+                        if (_autoScroll) {
+                          _startAutoScroll();
+                        }
+                      });
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(Icons.settings, color: Colors.white),
+                    onPressed: _showSettings,
+                  ),
+                  if (chapter.nextChapter != null)
+                    IconButton(
+                      icon: Icon(Icons.skip_next, color: Colors.white),
+                      onPressed: () async {
+                        if (widget.isDownloaded) {
+                          // Find next chapter from offline chapters
+                          final currentIndex = _offlineChapters?.indexWhere(
+                            (c) => c.link == widget.chapterLink
+                          ) ?? -1;
+                          if (currentIndex < (_offlineChapters?.length ?? 0) - 1 && 
+                              _offlineChapters != null) {
+                            final nextChapter = _offlineChapters![currentIndex + 1];
+                            final localPath = await _getOfflineChapterPath(nextChapter.title);
+                            _navigateToChapter(nextChapter.link, localPath);
+                          }
+                        } else {
+                          _navigateToChapter(chapter.nextChapter!, null);
+                        }
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _navigateToChapter(String chapterLink, String? newLocalPath) {
+    if (!mounted) return;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChapterScreen(
+          chapterLink: chapterLink,
+          mangaTitle: widget.mangaTitle,
+          chapters: widget.isDownloaded ? _offlineChapters : widget.chapters,
+          mangaLink: widget.mangaLink,
+          mangaImage: widget.mangaImage,
+          isDownloaded: widget.isDownloaded,
+          localPath: newLocalPath,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Clamp opacity value to valid range
+    final opacity = _brightness.clamp(0.0, 1.0);
+    
     return Theme(
       data: Theme.of(context).copyWith(
         appBarTheme: Theme.of(context).appBarTheme.copyWith(
@@ -291,6 +538,7 @@ class _ChapterScreenState extends State<ChapterScreen> {
             ),
       ),
       child: Scaffold(
+        key: _scaffoldKey, // Add scaffold key here
         extendBodyBehindAppBar: true,
         appBar: _showControls
             ? AppBar(
@@ -309,20 +557,29 @@ class _ChapterScreenState extends State<ChapterScreen> {
                 ),
               )
             : null,
-        endDrawer: widget.chapters != null
-            ? ChapterListDrawer(
-                chapters: widget.chapters!,
+        endDrawer: (widget.chapters != null || _offlineChapters != null) ? 
+          Container(
+            width: MediaQuery.of(context).size.width * 0.85,
+            child: Drawer(
+              child: ChapterListDrawer(
+                chapters: widget.isDownloaded && _offlineChapters != null ? 
+                  _offlineChapters! : 
+                  widget.chapters ?? [],
                 currentChapterLink: widget.chapterLink,
                 mangaTitle: widget.mangaTitle,
-              )
-            : null,
+                mangaLink: widget.mangaLink,
+                mangaImage: widget.mangaImage,
+                isDownloaded: widget.isDownloaded,
+              ),
+            ),
+          ) : null,
         body: Stack(
           children: [
             Positioned.fill(
               child: Container(color: Colors.black),
             ),
             Opacity(
-              opacity: _brightness,
+              opacity: opacity, // Use clamped value
               child: SafeArea(
                 child: FutureBuilder<ChapterData>(
                   future: _chapterFuture,
@@ -367,75 +624,7 @@ class _ChapterScreenState extends State<ChapterScreen> {
                       child: Stack(
                         children: [
                           _buildImageList(chapter),
-                          if (_showControls)
-                            Positioned(
-                              bottom: 16,
-                              left: 16,
-                              right: 16,
-                              child: Card(
-                                color: Colors.black.withOpacity(0.7),
-                                child: Padding(
-                                  padding: EdgeInsets.all(8),
-                                  child: Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment.spaceEvenly,
-                                    children: [
-                                      if (chapter.prevChapter != null)
-                                        IconButton(
-                                          icon: Icon(Icons.skip_previous,
-                                              color: Colors.white),
-                                          onPressed: () =>
-                                              Navigator.pushReplacement(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) =>
-                                                  ChapterScreen(
-                                                chapterLink:
-                                                    chapter.prevChapter!,
-                                                mangaTitle: widget.mangaTitle,
-                                                chapters: widget.chapters,
-                                                mangaLink: widget.mangaLink,
-                                                mangaImage: widget.mangaImage,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      IconButton(
-                                        icon: Icon(Icons.list,
-                                            color: Colors.white),
-                                        onPressed: () => Scaffold.of(context)
-                                            .openEndDrawer(),
-                                      ),
-                                      IconButton(
-                                        icon: Icon(Icons.settings,
-                                            color: Colors.white),
-                                        onPressed: _showSettings,
-                                      ),
-                                      if (chapter.nextChapter != null)
-                                        IconButton(
-                                          icon: Icon(Icons.skip_next,
-                                              color: Colors.white),
-                                          onPressed: () =>
-                                              Navigator.pushReplacement(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (context) =>
-                                                  ChapterScreen(
-                                                chapterLink:
-                                                    chapter.nextChapter!,
-                                                mangaTitle: widget.mangaTitle,
-                                                chapters: widget.chapters,
-                                                mangaLink: widget.mangaLink,
-                                                mangaImage: widget.mangaImage,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
+                          if (_showControls) _buildControlPanel(chapter),
                         ],
                       ),
                     );

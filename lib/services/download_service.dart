@@ -291,4 +291,28 @@ class DownloadService {
       return [];
     }
   }
+
+  Future<Map<String, String>> getChapterMetadata(String mangaTitle, String chapterTitle) async {
+    try {
+      final path = await _metadataPath;
+      final file = File(path);
+      
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        final metadata = Map<String, dynamic>.from(json.decode(content));
+        
+        if (metadata.containsKey(mangaTitle) &&
+            metadata[mangaTitle]['chapters'].containsKey(chapterTitle)) {
+          final chapterData = metadata[mangaTitle]['chapters'][chapterTitle];
+          return {
+            'originalLink': chapterData['link'] ?? '',
+            'title': chapterData['title'] ?? '',
+          };
+        }
+      }
+    } catch (e) {
+      print('Error reading chapter metadata: $e');
+    }
+    return {};
+  }
 }

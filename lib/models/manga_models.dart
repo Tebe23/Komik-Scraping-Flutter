@@ -61,7 +61,7 @@ class ChapterInfo {
   final String link;
   final String time;
 
-  ChapterInfo({
+  ChapterInfo ({
     required this.title,
     required this.link,
     required this.time,
