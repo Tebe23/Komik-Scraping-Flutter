@@ -1,66 +1,62 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../services/download_manager.dart';
 import '../models/download_models.dart';
+import '../services/download_service.dart';
 import 'chapter_screen.dart';
 
-class DownloadsScreen extends StatelessWidget {
+class DownloadsScreen extends StatefulWidget {
+  @override
+  _DownloadsScreenState createState() => _DownloadsScreenState();
+}
+
+class _DownloadsScreenState extends State<DownloadsScreen> {
+  final DownloadService _downloadService = DownloadService();
   final DownloadManager _downloadManager = DownloadManager();
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text('Unduhan'),
-      ),
-      body: StreamBuilder<Map<String, DownloadItem>>(
-        stream: _downloadManager.downloadsStream,
-        initialData: {}, // Add this
+      appBar: AppBar(title: Text('Unduhan')),
+      body: FutureBuilder<List<MangaDownloadGroup>>(
+        future: _downloadService.getDownloadedManga(),
         builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return Center(child: Text('Terjadi kesalahan'));
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return Center(child: CircularProgressIndicator());
           }
 
-          final completedDownloads = _downloadManager.getCompletedGroups();
-          
-          return FutureBuilder<List<MangaDownloadGroup>>(
-            future: _verifyDownloadedGroups(completedDownloads),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return Center(child: Text('Tidak dapat memuat unduhan'));
-              }
+          if (snapshot.hasError) {
+            return Center(child: Text('Gagal memuat data unduhan'));
+          }
 
-              final groups = snapshot.data ?? [];
-              if (groups.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.download_done_outlined, size: 64, color: Colors.grey),
-                      SizedBox(height: 16),
-                      Text('Belum ada unduhan selesai'),
-                    ],
-                  ),
-                );
-              }
+          final groups = snapshot.data ?? [];
+          if (groups.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.download_done_outlined, size: 64, color: Colors.grey),
+                  SizedBox(height: 16),
+                  Text('Belum ada unduhan selesai'),
+                ],
+              ),
+            );
+          }
 
-              return ListView.builder(
-                itemCount: groups.length,
-                itemBuilder: (context, index) {
-                  final group = groups[index];
-                  return _buildMangaGroup(context, group);
-                },
-              );
-            },
+          return RefreshIndicator(
+            onRefresh: () async => setState(() {}),
+            child: ListView.builder(
+              itemCount: groups.length,
+              itemBuilder: (context, index) => _buildMangaGroup(groups[index]),
+            ),
           );
         },
       ),
     );
   }
 
-  Widget _buildMangaGroup(BuildContext context, MangaDownloadGroup group) {
+  Widget _buildMangaGroup(MangaDownloadGroup group) {
     return Card(
       margin: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: ExpansionTile(

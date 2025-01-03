@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../models/download_models.dart';
 
 class DownloadService {
@@ -23,6 +24,46 @@ class DownloadService {
     } else {
       final dir = await getApplicationDocumentsDirectory();
       return '${dir.path}/MangaDownloads';
+    }
+  }
+
+  Future<String> get _metadataPath async {
+    final basePath = await _downloadPath;
+    return '$basePath/metadata.json';
+  }
+
+  Future<void> saveMetadata(DownloadItem item) async {
+    try {
+      final path = await _metadataPath;
+      final file = File(path);
+      Map<String, dynamic> metadata = {};
+      
+      if (await file.exists()) {
+        final content = await file.readAsString();
+        metadata = Map<String, dynamic>.from(json.decode(content));
+      }
+
+      // Simpan metadata per manga
+      if (!metadata.containsKey(item.mangaTitle)) {
+        metadata[item.mangaTitle] = {
+          'title': item.mangaTitle,
+          'link': item.mangaLink,
+          'image': item.mangaImage,
+          'chapters': {},
+        };
+      }
+
+      // Simpan metadata chapter
+      metadata[item.mangaTitle]['chapters'][item.chapterTitle] = {
+        'title': item.chapterTitle,
+        'link': item.chapterLink,
+        'downloadedAt': DateTime.now().toIso8601String(),
+        'imageCount': item.imageUrls.length,
+      };
+
+      await file.writeAsString(json.encode(metadata));
+    } catch (e) {
+      print('Error saving metadata: $e');
     }
   }
 
@@ -115,6 +156,7 @@ class DownloadService {
           }
         }
 
+        await saveMetadata(item);
         onComplete();
       } finally {
         client.close();
@@ -180,5 +222,73 @@ class DownloadService {
     
     final files = await dir.list().length;
     return files == item.imageUrls.length;
+  }
+
+  Future<List<MangaDownloadGroup>> getDownloadedManga() async {
+    try {
+      final basePath = await _downloadPath;
+      final baseDir = Directory(basePath);
+      final metadataFile = File('$basePath/metadata.json');
+      
+      if (!await baseDir.exists()) return [];
+      
+      Map<String, dynamic> metadata = {};
+      if (await metadataFile.exists()) {
+        final content = await metadataFile.readAsString();
+        metadata = Map<String, dynamic>.from(json.decode(content));
+      }
+
+      final groups = <MangaDownloadGroup>[];
+      
+      for (var mangaDir in await baseDir.list().where((e) => e is Directory).toList()) {
+        if (mangaDir is! Directory) continue;
+        
+        final mangaName = mangaDir.path.split('/').last;
+        final mangaMetadata = metadata[mangaName];
+        if (mangaMetadata == null) continue;
+
+        final items = <DownloadItem>[];
+        
+        for (var chapterDir in await mangaDir.list().where((e) => e is Directory).toList()) {
+          if (chapterDir is! Directory) continue;
+          
+          final chapterName = chapterDir.path.split('/').last;
+          final chapterMetadata = mangaMetadata['chapters'][chapterName];
+          if (chapterMetadata == null) continue;
+
+          // Verifikasi file gambar
+          final imageFiles = await chapterDir
+              .list()
+              .where((e) => e.path.endsWith('.jpg'))
+              .toList();
+
+          if (imageFiles.length == chapterMetadata['imageCount']) {
+            items.add(DownloadItem(
+              mangaTitle: mangaName,
+              mangaLink: mangaMetadata['link'] ?? '',
+              mangaImage: mangaMetadata['image'] ?? '',
+              chapterTitle: chapterName,
+              chapterLink: chapterMetadata['link'] ?? '',
+              imageUrls: imageFiles.map((e) => e.path).toList(),
+              status: DownloadStatus.completed,
+            ));
+          }
+        }
+
+        if (items.isNotEmpty) {
+          groups.add(MangaDownloadGroup(
+            mangaId: mangaMetadata['link'] ?? mangaName,
+            title: mangaMetadata['title'] ?? mangaName,
+            image: mangaMetadata['image'] ?? '',
+            items: items,
+          ));
+        }
+      }
+
+      return groups;
+    } catch (e) {
+      print('Error reading downloaded manga: $e');
+      return [];
+    }
   }
 }
