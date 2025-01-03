@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:open_file/open_file.dart';
 import '../services/theme_service.dart';
 import '../services/history_service.dart';
+import '../services/settings_service.dart';
 import 'download_progress_screen.dart';
 import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
@@ -17,12 +18,15 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   final ThemeService _themeService = ThemeService();
   final HistoryService _historyService = HistoryService();
+  final SettingsService _settingsService = SettingsService();
   bool _isDarkMode = false;
+  int _maxConcurrentDownloads = 3;
 
   @override
   void initState() {
     super.initState();
     _loadTheme();
+    _loadSettings();
   }
 
   Future<void> _loadTheme() async {
@@ -33,6 +37,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } catch (e) {
       print('Error loading theme: $e');
     }
+  }
+
+  Future<void> _loadSettings() async {
+    _maxConcurrentDownloads = await _settingsService.getMaxConcurrentDownloads();
+    if (mounted) setState(() {});
   }
 
   Future<void> _exportData(BuildContext context) async {
@@ -134,6 +143,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text('Pilih file untuk dipulihkan'),
             leading: Icon(Icons.restore),
             onTap: () => _importData(context),
+          ),
+          Divider(),
+          ListTile(
+            title: Text('Batas Unduhan Bersamaan'),
+            subtitle: Text('Jumlah maksimal komik yang dapat diunduh sekaligus'),
+            trailing: DropdownButton<int>(
+              value: _maxConcurrentDownloads,
+              items: [1, 2, 3, 4, 5].map((int value) {
+                return DropdownMenuItem<int>(
+                  value: value,
+                  child: Text('$value'),
+                );
+              }).toList(),
+              onChanged: (int? newValue) async {
+                if (newValue != null) {
+                  await _settingsService.setMaxConcurrentDownloads(newValue);
+                  setState(() => _maxConcurrentDownloads = newValue);
+                }
+              },
+            ),
           ),
           Divider(),
           ListTile(

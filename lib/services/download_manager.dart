@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../models/download_models.dart';
 import 'download_service.dart';
+import 'settings_service.dart';
 
 class DownloadManager {
   static final DownloadManager _instance = DownloadManager._internal();
@@ -14,6 +15,7 @@ class DownloadManager {
   final Map<String, DownloadItem> _downloads = {};
   final _downloadController = StreamController<Map<String, DownloadItem>>.broadcast();
   bool _isProcessing = false;
+  final SettingsService _settingsService = SettingsService();
   
   Stream<Map<String, DownloadItem>> get downloadsStream => _downloadController.stream.asBroadcastStream();
   Map<String, DownloadItem> get downloads => Map.unmodifiable(_downloads);
@@ -149,7 +151,18 @@ class DownloadManager {
     _isProcessing = true;
 
     try {
+      final maxConcurrent = await _settingsService.getMaxConcurrentDownloads();
+      
       while (_downloads.values.any((item) => item.status == DownloadStatus.queued)) {
+        final activeDownloads = _downloads.values.where(
+          (item) => item.status == DownloadStatus.downloading
+        ).length;
+
+        if (activeDownloads >= maxConcurrent) {
+          await Future.delayed(Duration(seconds: 1));
+          continue;
+        }
+
         final item = _downloads.values.firstWhere(
           (item) => item.status == DownloadStatus.queued
         );
@@ -158,31 +171,38 @@ class DownloadManager {
         item.startTime = DateTime.now();
         _emitUpdate();
 
-        await _service.downloadChapter(
-          item,
-          (progress) {
-            if (item.status == DownloadStatus.downloading) {
-              item.progress = progress;
-              _emitUpdate();
-            }
-          },
-          () {
-            item.status = DownloadStatus.completed;
-            item.endTime = DateTime.now();
-            _emitUpdate();
-          },
-          (error) {
-            item.status = DownloadStatus.failed;
-            item.error = error;
-            item.endTime = DateTime.now();
-            _emitUpdate();
-          },
-        );
-
-        await Future.delayed(Duration(milliseconds: 100));
+        // Start download in parallel
+        unawaited(_downloadChapter(item));
       }
     } finally {
       _isProcessing = false;
+    }
+  }
+
+  Future<void> _downloadChapter(DownloadItem item) async {
+    try {
+      await _service.downloadChapter(
+        item,
+        (progress) {
+          if (item.status == DownloadStatus.downloading) {
+            item.progress = progress;
+            _emitUpdate();
+          }
+        },
+        () {
+          item.status = DownloadStatus.completed;
+          item.endTime = DateTime.now();
+          _emitUpdate();
+        },
+        (error) {
+          item.status = DownloadStatus.failed;
+          item.error = error;
+          item.endTime = DateTime.now();
+          _emitUpdate();
+        },
+      );
+    } catch (e) {
+      print('Download error: $e');
     }
   }
 
