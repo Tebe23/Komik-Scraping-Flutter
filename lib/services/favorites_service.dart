@@ -77,4 +77,26 @@ class FavoritesService {
       return false;
     }
   }
+
+  Future<void> updateLatestChapter(String mangaLink, String newChapter) async {
+    try {
+      final favorites = await getFavorites();
+      final index = favorites.indexWhere((f) => f.link == mangaLink);
+      
+      if (index != -1) {
+        favorites[index] = FavoriteManga(
+          title: favorites[index].title,
+          link: favorites[index].link,
+          image: favorites[index].image,
+          latestChapter: newChapter,
+          addedAt: favorites[index].addedAt,
+        );
+
+        final prefs = await this.prefs;
+        await prefs.setString(_key, json.encode(favorites.map((f) => f.toJson()).toList()));
+      }
+    } catch (e) {
+      print('Error updating latest chapter: $e');
+    }
+  }
 }

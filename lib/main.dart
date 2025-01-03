@@ -6,6 +6,8 @@ import 'services/theme_service.dart';
 import 'screens/main_layout.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
+import 'services/notification_service.dart';
+import 'services/update_checker_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,6 +23,10 @@ void main() async {
   } catch (e) {
     // Ignore error on devices that don't support it
   }
+
+  // Initialize services
+  await NotificationService().initialize();
+  await UpdateCheckerService().initialize();
 
   runApp(MyApp());
 }
