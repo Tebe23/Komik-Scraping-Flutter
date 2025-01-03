@@ -6,6 +6,7 @@ import '../widgets/error_screen.dart';
 import 'detail_screen.dart';
 import 'search_screen.dart';
 import '../services/cache_service.dart';
+import 'view_all_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -239,7 +240,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       TextButton(
                         onPressed: () {
-                          // Action for viewing more popular manga
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => ViewAllScreen(
+                                title: 'Komik Populer',
+                                isPopular: true,
+                              ),
+                            ),
+                          );
                         },
                         child: Text(
                           'Lihat Lainnya',
@@ -331,29 +340,40 @@ class _HomeScreenState extends State<HomeScreen> {
               // Latest Manga Grid
               SliverPadding(
                 padding: EdgeInsets.symmetric(horizontal: 16),
-                sliver: SliverGrid(
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.6,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                  ),
-                  delegate: SliverChildBuilderDelegate(
-                    (context, index) {
-                      final filteredList = _latestMangaList
-                          .where((manga) =>
-                              _selectedType == 'All' ||
-                              manga.type == _selectedType)
-                          .toList();
-                      return MangaCard(manga: filteredList[index]);
-                    },
-                    childCount: _latestMangaList
-                        .where((manga) =>
-                            _selectedType == 'All' ||
-                            manga.type == _selectedType)
-                        .length,
-                  ),
-                ),
+                sliver: _isLoadingLatest
+                    ? SliverToBoxAdapter(
+                        child: Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    : SliverGrid(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          childAspectRatio: 0.6,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final filteredList = _latestMangaList
+                                .where((manga) =>
+                                    _selectedType == 'All' ||
+                                    manga.type == _selectedType)
+                                .toList();
+                            
+                            if (index >= filteredList.length) {
+                              return null;
+                            }
+                            
+                            return MangaCard(manga: filteredList[index]);
+                          },
+                          childCount: _latestMangaList
+                              .where((manga) =>
+                                  _selectedType == 'All' ||
+                                  manga.type == _selectedType)
+                              .length,
+                        ),
+                      ),
               ),
 
               // View More Button
@@ -363,7 +383,15 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: Center(
                     child: ElevatedButton(
                       onPressed: () {
-                        // Action for viewing more latest manga
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ViewAllScreen(
+                              title: 'Komik Terbaru',
+                              isPopular: false,
+                            ),
+                          ),
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         padding:

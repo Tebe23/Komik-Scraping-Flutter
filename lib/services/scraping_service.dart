@@ -7,18 +7,18 @@ import 'dart:io';
 class ScrapingService {
   static const baseUrl = 'https://komikcast.bz';
 
-  Future<List<Manga>> scrapePopularManga() async {
+  Future<List<Manga>> scrapePopularManga({int page = 1}) async {
     try {
-      final popularUrl = '$baseUrl/daftar-komik/?status=&type=&orderby=popular';
+      final popularUrl = '$baseUrl/daftar-komik/page/$page/?status=&type=&orderby=popular';
       return _scrapeMangaList(popularUrl);
     } catch (e) {
       throw Exception('Error scraping popular manga: $e');
     }
   }
 
-  Future<List<Manga>> scrapeLatestManga() async {
+  Future<List<Manga>> scrapeLatestManga({int page = 1}) async {
     try {
-      final latestUrl = '$baseUrl/daftar-komik/?sortby=update';
+      final latestUrl = '$baseUrl/daftar-komik/page/$page/?sortby=update';
       return _scrapeMangaList(latestUrl);
     } catch (e) {
       throw Exception('Error scraping latest manga: $e');

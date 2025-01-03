@@ -7,7 +7,10 @@ import '../models/history_model.dart';
 import 'chapter_screen.dart';
 import '../widgets/shimmer_loading.dart';
 import '../services/reading_state_service.dart';
+import '../services/download_service.dart';
+import '../services/download_manager.dart'; // Add this
 import 'dart:async';
+import '../models/download_models.dart';
 
 class DetailScreen extends StatefulWidget {
   final String mangaLink;
@@ -23,6 +26,8 @@ class _DetailScreenState extends State<DetailScreen> {
   final FavoritesService _favoritesService = FavoritesService();
   final HistoryService _historyService = HistoryService();
   final ReadingStateService _readingStateService = ReadingStateService();
+  final DownloadService _downloadService = DownloadService();
+  final DownloadManager _downloadManager = DownloadManager(); // Add this
   late Future<MangaDetail> _mangaDetailFuture;
   bool _isFavorite = false;
   bool _isChapterReversed = false;
@@ -30,6 +35,7 @@ class _DetailScreenState extends State<DetailScreen> {
   String? _lastReadChapter;
   List<String> _readChapters = [];
   StreamSubscription? _readingSubscription;
+  bool _isDisposed = false;
 
   @override
   void initState() {
@@ -41,6 +47,7 @@ class _DetailScreenState extends State<DetailScreen> {
   void _listenToReadingChanges() {
     _readingSubscription =
         _readingStateService.onChapterRead.listen((chapterLink) {
+      if (_isDisposed) return;
       if (!mounted) return;
       if (!_readChapters.contains(chapterLink)) {
         setState(() {
@@ -52,11 +59,13 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   void dispose() {
+    _isDisposed = true;
     _readingSubscription?.cancel();
     super.dispose();
   }
 
   Future<void> _initializeData() async {
+    if (_isDisposed) return;
     try {
       _mangaDetailFuture = _scrapingService.scrapeMangaDetail(widget.mangaLink);
       await Future.wait([
@@ -159,6 +168,241 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
+  Future<void> _downloadSelectedChapters(
+    List<ChapterInfo> chapters,
+    MangaDetail manga, 
+    BuildContext contextDialog
+  ) async {
+    if (!mounted) return;
+
+    try {
+      final items = <DownloadItem>[];
+      
+      // Create download items
+      for (var chapter in chapters) {
+        final downloadId = '${widget.mangaLink}_${chapter.link}';
+        if (_downloadManager.downloads.containsKey(downloadId)) continue;
+
+        final chapterData = await _scrapingService.scrapeChapter(chapter.link);
+        if (chapterData.images.isEmpty) continue;
+
+        items.add(DownloadItem(
+          id: downloadId,
+          mangaTitle: manga.title,
+          mangaLink: widget.mangaLink,
+          mangaImage: manga.thumbnail,
+          chapterTitle: chapter.title,
+          chapterLink: chapter.link,
+          imageUrls: chapterData.images,
+        ));
+      }
+
+      if (items.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Tidak ada chapter baru untuk diunduh'),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+        return;
+      }
+
+      // Add to download queue
+      await _downloadManager.addDownloads(items);
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Memulai unduhan ${items.length} chapter'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Gagal memulai unduhan'),
+          backgroundColor: Colors.red,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
+  void _showDownloadOptions(BuildContext context, MangaDetail manga) {
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (bottomSheetContext) => Container(
+        padding: EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(Icons.download_done),
+              title: Text('Unduh Semua Chapter (${manga.chapters.length})'),
+              onTap: () {
+                Navigator.pop(bottomSheetContext);
+                if (mounted) {
+                  _downloadSelectedChapters(manga.chapters, manga, context);
+                }
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.new_releases),
+              title: Text('Unduh Chapter Belum Dibaca'),
+              subtitle: Text(
+                '${manga.chapters.where((c) => !_readChapters.contains(c.link)).length} chapter'
+              ),
+              onTap: () {
+                Navigator.pop(bottomSheetContext);
+                if (mounted) {
+                  final unreadChapters = manga.chapters
+                      .where((chapter) => !_readChapters.contains(chapter.link))
+                      .toList();
+                  _downloadSelectedChapters(unreadChapters, manga, context);
+                }
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.playlist_add_check),
+              title: Text('Pilih Chapter untuk Diunduh'),
+              onTap: () {
+                Navigator.pop(bottomSheetContext);
+                if (mounted) {
+                  _showChapterSelectionDialog(context, manga);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showChapterSelectionDialog(
+      BuildContext parentContext, MangaDetail manga) {
+    if (!mounted) return;
+    List<ChapterInfo> selectedChapters = [];
+
+    showDialog(
+      context: parentContext,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text('Pilih Chapter'),
+          content: SizedBox(
+            width: MediaQuery.of(context).size.width * 0.9,
+            height: MediaQuery.of(context).size.height * 0.7,
+            child: Column(
+              children: [
+                // Header dengan tombol Pilih Semua/Hapus Semua
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    TextButton.icon(
+                      icon: Icon(Icons.select_all),
+                      label: Text('Pilih Semua'),
+                      onPressed: () => setDialogState(() {
+                        selectedChapters = List.from(manga.chapters);
+                      }),
+                    ),
+                    TextButton.icon(
+                      icon: Icon(Icons.clear_all),
+                      label: Text('Hapus Semua'),
+                      onPressed: () => setDialogState(() {
+                        selectedChapters.clear();
+                      }),
+                    ),
+                  ],
+                ),
+                Divider(),
+                // List chapter yang dapat di-scroll
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: manga.chapters.length,
+                    itemBuilder: (context, index) {
+                      final chapter = manga.chapters[index];
+                      final isSelected = selectedChapters.contains(chapter);
+
+                      return CheckboxListTile(
+                        title: Text(
+                          chapter.title,
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: isSelected
+                                ? Theme.of(context).primaryColor
+                                : null,
+                          ),
+                        ),
+                        subtitle: Text(
+                          'Chapter ${manga.chapters.length - index}',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        value: isSelected,
+                        onChanged: (bool? value) {
+                          setDialogState(() {
+                            if (value == true) {
+                              selectedChapters.add(chapter);
+                            } else {
+                              selectedChapters.remove(chapter);
+                            }
+                          });
+                        },
+                        dense: true,
+                        activeColor: Theme.of(context).primaryColor,
+                        checkColor: Colors.white,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: Text('Batal'),
+            ),
+            ElevatedButton.icon(
+              icon: Icon(Icons.download),
+              label: Text('Unduh (${selectedChapters.length})'),
+              onPressed: selectedChapters.isEmpty
+                  ? null
+                  : () {
+                      Navigator.pop(dialogContext);
+                      if (mounted) {
+                        _downloadSelectedChapters(
+                          selectedChapters,
+                          manga,
+                          dialogContext,
+                        );
+                      }
+                    },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showMessage(BuildContext context, String message, {bool isError = false}) {
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(
+        children: [
+          Icon(
+            isError ? Icons.error_outline : Icons.download,
+            color: Colors.white,
+          ),
+          SizedBox(width: 12),
+          Expanded(child: Text(message)),
+        ],
+      ),
+      backgroundColor: isError ? Colors.red : null,
+      behavior: SnackBarBehavior.floating,
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -187,6 +431,12 @@ class _DetailScreenState extends State<DetailScreen> {
                 SliverAppBar(
                   pinned: true,
                   title: Text(manga.title),
+                  actions: [
+                    IconButton(
+                      icon: Icon(Icons.download),
+                      onPressed: () => _showDownloadOptions(context, manga),
+                    ),
+                  ],
                 ),
                 SliverToBoxAdapter(
                   child: Padding(
@@ -418,27 +668,32 @@ class _DetailScreenState extends State<DetailScreen> {
                           child: ListTile(
                             title: Row(
                               children: [
-                                Text(
-                                  'Chapter ${manga.chapters.length - actualIndex}',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 15,
-                                    color: _readChapters.contains(chapter.link)
-                                        ? Theme.of(context).primaryColor
-                                        : null,
+                                // Chapter number with fixed width
+                                Container(
+                                  width: 80, // Fixed width for chapter number
+                                  child: Text(
+                                    'Chapter ${manga.chapters.length - actualIndex}',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: 15,
+                                      color: _readChapters.contains(chapter.link)
+                                          ? Theme.of(context).primaryColor
+                                          : null,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                                 SizedBox(width: 8),
+                                // Chapter title with flexible width
                                 Expanded(
                                   child: Text(
                                     chapter.title,
                                     style: TextStyle(
                                       fontWeight: FontWeight.w500,
                                       fontSize: 15,
-                                      color:
-                                          _readChapters.contains(chapter.link)
-                                              ? Theme.of(context).primaryColor
-                                              : null,
+                                      color: _readChapters.contains(chapter.link)
+                                          ? Theme.of(context).primaryColor
+                                          : null,
                                     ),
                                     overflow: TextOverflow.ellipsis,
                                     maxLines: 1,
@@ -447,12 +702,15 @@ class _DetailScreenState extends State<DetailScreen> {
                               ],
                             ),
                             subtitle: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  'Diperbarui ${chapter.time}',
-                                  style: TextStyle(fontSize: 12),
-                                  overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
+                                Flexible(
+                                  child: Text(
+                                    'Diperbarui ${chapter.time}',
+                                    style: TextStyle(fontSize: 12),
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
                                 ),
                                 if (_readChapters.contains(chapter.link)) ...[
                                   SizedBox(width: 8),
@@ -470,6 +728,11 @@ class _DetailScreenState extends State<DetailScreen> {
                                 if (_readChapters.contains(chapter.link))
                                   IconButton(
                                     icon: Icon(Icons.remove_circle_outline),
+                                    constraints: BoxConstraints(
+                                      minWidth: 40,
+                                      maxWidth: 40,
+                                    ),
+                                    padding: EdgeInsets.zero,
                                     onPressed: () async {
                                       await _historyService
                                           .removeFromHistory(chapter.link);
@@ -479,7 +742,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                       }
                                     },
                                   ),
-                                Icon(Icons.chevron_right),
+                                Icon(Icons.chevron_right, size: 20),
                               ],
                             ),
                             onTap: () async {

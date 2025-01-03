@@ -4,9 +4,16 @@ import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
 import 'services/theme_service.dart';
 import 'screens/main_layout.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'dart:io';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Request storage permission
+  if (Platform.isAndroid) {
+    await Permission.storage.request();
+  }
 
   // Enable high refresh rate
   try {

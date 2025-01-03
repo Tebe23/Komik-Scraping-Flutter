@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:async';
+import 'dart:io';
 import '../services/scraping_service.dart';
 import '../models/manga_models.dart';
 import '../widgets/shimmer_loading.dart';
@@ -18,6 +19,8 @@ class ChapterScreen extends StatefulWidget {
   final List<ChapterInfo>? chapters;
   final String? mangaLink;
   final String? mangaImage;
+  final bool isDownloaded;
+  final String? localPath;
 
   const ChapterScreen({
     Key? key,
@@ -26,6 +29,8 @@ class ChapterScreen extends StatefulWidget {
     this.chapters,
     this.mangaLink,
     this.mangaImage,
+    this.isDownloaded = false,
+    this.localPath,
   }) : super(key: key);
 
   @override
@@ -172,6 +177,111 @@ class _ChapterScreenState extends State<ChapterScreen> {
     });
   }
 
+  Future<List<String>> _getLocalImages() async {
+    if (!widget.isDownloaded || widget.localPath == null) return [];
+
+    try {
+      final path = widget.localPath!;
+      print('Reading from: $path'); // Tambah log ini
+      
+      final dir = Directory(path);
+      if (!await dir.exists()) {
+        print('Directory does not exist: $path'); // Tambah log ini
+        return [];
+      }
+
+      final List<String> images = [];
+      final contents = await dir.list().toList();
+      print('Found ${contents.length} files'); // Tambah log ini
+      
+      for (var file in contents) {
+        print('Found file: ${file.path}'); // Tambah log ini
+        if (file is File && file.path.endsWith('.jpg')) {
+          images.add(file.path);
+        }
+      }
+      
+      images.sort();
+      print('Found ${images.length} images'); // Tambah log ini
+      return images;
+    } catch (e) {
+      print('Error loading local images: $e');
+      return [];
+    }
+  }
+
+  Widget _buildImageList(ChapterData chapter) {
+    if (widget.isDownloaded) {
+      return FutureBuilder<List<String>>(
+        future: _getLocalImages(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline, size: 64, color: Colors.red),
+                  SizedBox(height: 16),
+                  Text('Tidak dapat memuat gambar lokal'),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            controller: _scrollController,
+            itemCount: snapshot.data!.length,
+            itemBuilder: (context, index) {
+              return Image.file(
+                File(snapshot.data![index]),
+                errorBuilder: (context, error, stackTrace) {
+                  print('Error loading image: $error');
+                  return Container(
+                    height: 400,
+                    color: Colors.grey[300],
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.broken_image, size: 64),
+                        Text('Failed to load image'),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      );
+    }
+
+    // Online reading
+    return ListView.builder(
+      controller: _scrollController,
+      itemCount: chapter.images.length,
+      itemBuilder: (context, index) {
+        return CachedNetworkImage(
+          imageUrl: chapter.images[index],
+          placeholder: (context, url) => ShimmerLoading(
+            width: double.infinity,
+            height: 400,
+          ),
+          errorWidget: (context, url, error) => Container(
+            height: 400,
+            color: Colors.grey[300],
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.broken_image, size: 64),
+                Text('Failed to load image'),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Theme(
@@ -256,30 +366,7 @@ class _ChapterScreenState extends State<ChapterScreen> {
                       onTap: _toggleControls,
                       child: Stack(
                         children: [
-                          ListView.builder(
-                            controller: _scrollController,
-                            itemCount: chapter.images.length,
-                            itemBuilder: (context, index) {
-                              return CachedNetworkImage(
-                                imageUrl: chapter.images[index],
-                                placeholder: (context, url) => ShimmerLoading(
-                                  width: double.infinity,
-                                  height: 400,
-                                ),
-                                errorWidget: (context, url, error) => Container(
-                                  height: 400,
-                                  color: Colors.grey[300],
-                                  child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                      Icon(Icons.broken_image, size: 64),
-                                      Text('Failed to load image'),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
+                          _buildImageList(chapter),
                           if (_showControls)
                             Positioned(
                               bottom: 16,
