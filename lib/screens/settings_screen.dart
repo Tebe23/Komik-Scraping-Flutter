@@ -146,14 +146,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           Divider(),
           ListTile(
-            title: Text('Batas Unduhan Bersamaan'),
-            subtitle: Text('Jumlah maksimal komik yang dapat diunduh sekaligus'),
+            title: Text('Batas Manga Bersamaan'),
+            subtitle: Text('Jumlah maksimal manga yang dapat diunduh sekaligus'),
             trailing: DropdownButton<int>(
               value: _maxConcurrentDownloads,
               items: [1, 2, 3, 4, 5].map((int value) {
                 return DropdownMenuItem<int>(
                   value: value,
-                  child: Text('$value'),
+                  child: Text('$value manga'),
                 );
               }).toList(),
               onChanged: (int? newValue) async {

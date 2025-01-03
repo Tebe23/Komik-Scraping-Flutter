@@ -153,26 +153,37 @@ class DownloadManager {
     try {
       final maxConcurrent = await _settingsService.getMaxConcurrentDownloads();
       
-      while (_downloads.values.any((item) => item.status == DownloadStatus.queued)) {
-        final activeDownloads = _downloads.values.where(
-          (item) => item.status == DownloadStatus.downloading
-        ).length;
+      // Hitung jumlah manga yang sedang diunduh
+      final activeMangaIds = _downloads.values
+          .where((item) => item.status == DownloadStatus.downloading)
+          .map((item) => item.mangaId)
+          .toSet();
 
-        if (activeDownloads >= maxConcurrent) {
+      while (_downloads.values.any((item) => item.status == DownloadStatus.queued)) {
+        // Jika sudah mencapai batas manga yang diunduh bersamaan
+        if (activeMangaIds.length >= maxConcurrent) {
           await Future.delayed(Duration(seconds: 1));
           continue;
         }
 
-        final item = _downloads.values.firstWhere(
-          (item) => item.status == DownloadStatus.queued
+        // Cari chapter berikutnya dari manga yang sudah diunduh atau manga baru
+        final nextItem = _downloads.values.firstWhere(
+          (item) => item.status == DownloadStatus.queued && 
+                    (activeMangaIds.isEmpty || activeMangaIds.contains(item.mangaId)),
+          orElse: () => _downloads.values.firstWhere(
+            (item) => item.status == DownloadStatus.queued,
+          ),
         );
 
-        item.status = DownloadStatus.downloading;
-        item.startTime = DateTime.now();
+        nextItem.status = DownloadStatus.downloading;
+        nextItem.startTime = DateTime.now();
+        activeMangaIds.add(nextItem.mangaId);
         _emitUpdate();
 
         // Start download in parallel
-        unawaited(_downloadChapter(item));
+        unawaited(_downloadChapter(nextItem).then((_) {
+          activeMangaIds.remove(nextItem.mangaId);
+        }));
       }
     } finally {
       _isProcessing = false;

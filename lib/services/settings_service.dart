@@ -10,6 +10,6 @@ class SettingsService {
 
   Future<int> getMaxConcurrentDownloads() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_maxConcurrentDownloadsKey) ?? 3; // Default 3
+    return prefs.getInt(_maxConcurrentDownloadsKey) ?? 1; // Default 1
   }
 }
