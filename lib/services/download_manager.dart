@@ -5,14 +5,17 @@ import 'download_service.dart';
 class DownloadManager {
   static final DownloadManager _instance = DownloadManager._internal();
   factory DownloadManager() => _instance;
-  DownloadManager._internal();
+  DownloadManager._internal() {
+    // Initialize with empty data
+    _emitUpdate();
+  }
 
   final DownloadService _service = DownloadService();
   final Map<String, DownloadItem> _downloads = {};
   final _downloadController = StreamController<Map<String, DownloadItem>>.broadcast();
   bool _isProcessing = false;
   
-  Stream<Map<String, DownloadItem>> get downloadsStream => _downloadController.stream;
+  Stream<Map<String, DownloadItem>> get downloadsStream => _downloadController.stream.asBroadcastStream();
   Map<String, DownloadItem> get downloads => Map.unmodifiable(_downloads);
   List<DownloadItem> get activeDownloads => 
     _downloads.values.where((item) => item.isActive).toList();

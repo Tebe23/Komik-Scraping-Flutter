@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:open_file/open_file.dart';
 import '../services/theme_service.dart';
 import '../services/history_service.dart';
+import 'download_progress_screen.dart';
 import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -133,6 +134,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             subtitle: Text('Pilih file untuk dipulihkan'),
             leading: Icon(Icons.restore),
             onTap: () => _importData(context),
+          ),
+          Divider(),
+          ListTile(
+            leading: Icon(Icons.download),
+            title: Text('Proses Unduhan'),
+            subtitle: Text('Lihat dan kelola unduhan yang sedang berlangsung'),
+            onTap: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => DownloadProgressScreen(),
+                ),
+              );
+            },
           ),
           Divider(),
           AboutListTile(
